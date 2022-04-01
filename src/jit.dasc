@@ -1,0 +1,78 @@
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <dynasm/dasm_proto.h>
+#include <dynasm/dasm_x86.h>
+#include <sys/mman.h>
+
+|.arch x64
+
+#if !defined(MAP_ANONYMOUS) && defined(MAP_ANON)
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+
+#define VM_RAX 0
+#define VM_RCX 1
+#define VM_RDX 2
+#define VM_RBX 3
+#define VM_RSP 4
+#define VM_RBP 5
+#define VM_RSI 6
+#define VM_RDI 7
+
+int jit49_run_file(FILE *file) {
+    dasm_State* d;
+    |.section code
+    dasm_init(&d, DASM_MAXSECTION);
+    |.globals lbl_
+    void* labels[lbl__MAX];
+    dasm_setupglobal(&d, labels, lbl__MAX);
+    |.actionlist vm_actions
+    dasm_setup(&d, vm_actions);
+    // dasm_growpc(&d, nops);
+    dasm_State** Dst = &d;
+    |.code
+    |->main:
+    for(int i = 0; i <= 15; i++) {
+        if (i != VM_RSP && i != VM_RBP) {
+            |push Rq(i)
+        }
+    }
+    for(int i = 15; i >= 0; i++) {
+        if (i != VM_RSP && i != VM_RBP) {
+            |pop Rq(i)
+        }
+    }
+    |ret
+    size_t sz;
+    void* buf;
+    dasm_link(&d, &sz);
+    buf = mmap(0, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    dasm_encode(&d, buf);
+    mprotect(buf, sz, PROT_READ | PROT_EXEC);
+    dasm_free(&d);
+    void(*fn)(void) = labels[lbl_main];
+    fn();
+    munmap(buf, sz);
+    return 0;
+}
+
+int jit49_main(char const *filename) {
+    FILE *input = fopen(filename, "r");
+    if (input == NULL) {
+        fprintf(stderr, "could not open file: %s\n", filename);
+    }
+    int res = jit49_run_file(input);
+    fclose(input);
+    return res;
+}
+
+int main(int argc, char const *const *argv)
+{
+    if (argc <= 1) {
+        fprintf(stderr, "cli: need a file as an argument\n");
+        return 1;
+    }
+    int res = jit49_main(argv[1]);
+    return res;
+}
